@@ -1,9 +1,10 @@
 "use client"
 
 import useSWR from "swr"
-import { Suspense } from "react"
+import { Suspense, useState } from "react"
 import { NewProjectDialog } from "@/components/new-project-dialog"
 import { ProjectCard } from "@/components/project-card"
+import { ApplicationSelector } from "@/components/application-selector"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Database, FolderOpen } from "lucide-react"
 
@@ -79,7 +80,13 @@ function ProjectsList({ data, mutate }: { data: any; mutate: () => void }) {
 }
 
 export default function DashboardPage() {
-  const { data, isLoading, mutate } = useSWR("/api/projects", fetcher)
+  const [selectedAppId, setSelectedAppId] = useState<string | undefined>(undefined)
+  const { data, isLoading, mutate } = useSWR(
+    selectedAppId 
+      ? `/api/projects?appId=${selectedAppId}` 
+      : "/api/projects", 
+    fetcher
+  )
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
@@ -90,7 +97,14 @@ export default function DashboardPage() {
             Upload source code to trace database column lineage
           </p>
         </div>
-        <NewProjectDialog onCreated={() => mutate()} />
+        <NewProjectDialog onCreated={() => mutate()} selectedAppId={selectedAppId} />
+      </div>
+
+      <div className="mt-4">
+        <ApplicationSelector
+          selectedAppId={selectedAppId}
+          onSelect={setSelectedAppId}
+        />
       </div>
 
       <div className="mt-8">

@@ -20,9 +20,10 @@ import { toast } from "sonner"
 
 interface NewProjectDialogProps {
   onCreated: () => void
+  selectedAppId?: string
 }
 
-export function NewProjectDialog({ onCreated }: NewProjectDialogProps) {
+export function NewProjectDialog({ onCreated, selectedAppId }: NewProjectDialogProps) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
@@ -37,7 +38,7 @@ export function NewProjectDialog({ onCreated }: NewProjectDialogProps) {
       const res = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description }),
+        body: JSON.stringify({ name, description, applicationId: selectedAppId }),
       })
 
       if (!res.ok) {

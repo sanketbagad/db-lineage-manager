@@ -1,6 +1,6 @@
 "use client"
 
-import React from "react"
+import React, { useRef } from "react"
 
 import { useState, useCallback, lazy, Suspense } from "react"
 import { useParams, useRouter } from "next/navigation"
@@ -14,6 +14,7 @@ import { FileBrowser } from "@/components/file-browser"
 import { LanguageLegend } from "@/components/language-legend"
 import { UsageDetail } from "@/components/usage-detail"
 import { JobsStatus } from "@/components/jobs-status"
+import { LineageControls } from "@/components/lineage-controls"
 import {
   ArrowLeft,
   Database,
@@ -21,6 +22,7 @@ import {
   GitBranch,
   Sparkles,
   Loader2,
+  Table as TableIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 import {
@@ -52,18 +54,27 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json())
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
+  const flowContainerRef = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [selectedUsage, setSelectedUsage] = useState<any>(null)
   const [usageDetailOpen, setUsageDetailOpen] = useState(false)
   const [isGeneratingDescriptions, setIsGeneratingDescriptions] = useState(false)
+  const [selectedTable, setSelectedTable] = useState<string | null>(null)
+  const [selectedColumn, setSelectedColumn] = useState<string | null>(null)
+  const [isRegenerating, setIsRegenerating] = useState(false)
 
   const { data, mutate, isLoading } = useSWR(`/api/projects/${id}`, fetcher, {
     refreshInterval: 5000,
   })
-  const { data: lineageData, mutate: mutateLineage } = useSWR(
-    data?.project?.status === "completed" ? `/api/projects/${id}/lineage` : null,
-    fetcher
-  )
+
+  // Build lineage URL based on selected table/column
+  const lineageUrl = data?.project?.status === "completed"
+    ? selectedTable
+      ? `/api/projects/${id}/lineage?table=${encodeURIComponent(selectedTable)}${selectedColumn ? `&column=${encodeURIComponent(selectedColumn)}` : ""}`
+      : `/api/projects/${id}/lineage`
+    : null
+
+  const { data: lineageData, mutate: mutateLineage } = useSWR(lineageUrl, fetcher)
 
   const handleUploadComplete = useCallback(() => {
     mutate()
@@ -86,6 +97,15 @@ export default function ProjectDetailPage() {
     }
   }, [id, mutate, mutateLineage])
 
+  const handleRegenerate = useCallback(async () => {
+    setIsRegenerating(true)
+    try {
+      await mutateLineage()
+    } finally {
+      setIsRegenerating(false)
+    }
+  }, [mutateLineage])
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleUsageClick = useCallback((usage: any) => {
     setSelectedUsage(usage)
@@ -95,6 +115,10 @@ export default function ProjectDetailPage() {
   const handleColumnClick = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (column: any, tableName: string) => {
+      // Set selected table and column for lineage generation
+      setSelectedTable(tableName)
+      setSelectedColumn(column.column_name)
+
       const usages = lineageData?.usages || []
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const columnUsage = usages.find(
@@ -108,6 +132,16 @@ export default function ProjectDetailPage() {
     },
     [lineageData]
   )
+
+  const handleTableSelect = useCallback((tableName: string) => {
+    setSelectedTable(tableName)
+    setSelectedColumn(null) // Reset column when table changes
+  }, [])
+
+  const clearSelection = useCallback(() => {
+    setSelectedTable(null)
+    setSelectedColumn(null)
+  }, [])
 
   if (isLoading) {
     return (
@@ -138,7 +172,7 @@ export default function ProjectDetailPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-6 p-4 md:p-6 max-w-[1800px] mx-auto w-full">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-4">
@@ -249,18 +283,55 @@ export default function ProjectDetailPage() {
                 Jobs
               </TabsTrigger>
             </TabsList>
-            <LanguageLegend files={files} />
+            <div className="flex items-center gap-4">
+              <LanguageLegend files={files} />
+              <LineageControls
+                projectId={id}
+                tableName={selectedTable || undefined}
+                columnName={selectedColumn || undefined}
+                onRegenerate={handleRegenerate}
+                flowContainerRef={flowContainerRef}
+                lineageData={lineageData?.lineage || lineageData}
+                isRegenerating={isRegenerating}
+              />
+            </div>
           </div>
+
+          {/* Selected Table/Column Indicator */}
+          {selectedTable && (
+            <div className="mt-2 flex items-center gap-2">
+              <Badge variant="secondary" className="gap-1.5">
+                <TableIcon className="h-3 w-3" />
+                {selectedTable}
+                {selectedColumn && ` → ${selectedColumn}`}
+              </Badge>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearSelection}
+                className="h-6 px-2 text-xs"
+              >
+                Clear
+              </Button>
+              {lineageData?.fromCache && (
+                <Badge variant="outline" className="text-xs">
+                  Cached
+                </Badge>
+              )}
+            </div>
+          )}
 
           <Separator className="my-4" />
 
           <TabsContent value="lineage" className="mt-0">
-            <Suspense fallback={<LineageFlowSkeleton />}>
-              <LineageFlow
-                usages={usages}
-                onUsageClick={handleUsageClick}
-              />
-            </Suspense>
+            <div ref={flowContainerRef} className="rounded-lg border bg-card overflow-hidden" style={{ height: "calc(100vh - 380px)", minHeight: "600px" }}>
+              <Suspense fallback={<LineageFlowSkeleton />}>
+                <LineageFlow
+                  usages={usages}
+                  onUsageClick={handleUsageClick}
+                />
+              </Suspense>
+            </div>
           </TabsContent>
 
           <TabsContent value="column-map" className="mt-0">
@@ -274,6 +345,7 @@ export default function ProjectDetailPage() {
               <SchemaViewer
                 schemas={schemas}
                 onColumnClick={handleColumnClick}
+                onTableSelect={handleTableSelect}
               />
             </Suspense>
           </TabsContent>

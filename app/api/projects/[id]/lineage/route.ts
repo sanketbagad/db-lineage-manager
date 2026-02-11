@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
 import { getDb } from "@/lib/db"
+import { lineageService } from "@/lib/services/lineage-service"
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -22,7 +23,28 @@ export async function GET(
       return NextResponse.json({ error: "Project not found" }, { status: 404 })
     }
 
-    // Get all usages with full details
+    // Check for query params for new lineage format
+    const url = new URL(req.url)
+    const tableName = url.searchParams.get("table")
+    const columnName = url.searchParams.get("column")
+    const regenerate = url.searchParams.get("regenerate") === "true"
+
+    // If table is specified, use new component-based lineage
+    if (tableName) {
+      const { lineage, fromCache } = await lineageService.generateLineage(
+        [id],
+        tableName,
+        columnName,
+        regenerate
+      )
+      return NextResponse.json({
+        lineage,
+        fromCache,
+        generatedAt: new Date().toISOString(),
+      })
+    }
+
+    // Original behavior - get all usages with full details
     const usages = await sql`
       SELECT
         cu.id as usage_id,
