@@ -23,7 +23,10 @@ import {
   Sparkles,
   Loader2,
   Table as TableIcon,
+  AlertCircle,
+  Trash2,
 } from "lucide-react"
+import { DeleteProjectDialog } from "@/components/delete-project-dialog"
 import { toast } from "sonner"
 import {
   LineageFlowSkeleton,
@@ -74,7 +77,7 @@ export default function ProjectDetailPage() {
       : `/api/projects/${id}/lineage`
     : null
 
-  const { data: lineageData, mutate: mutateLineage } = useSWR(lineageUrl, fetcher)
+  const { data: lineageData, mutate: mutateLineage, isLoading: isLineageLoading, isValidating: isLineageValidating } = useSWR(lineageUrl, fetcher)
 
   const handleUploadComplete = useCallback(() => {
     mutate()
@@ -105,6 +108,35 @@ export default function ProjectDetailPage() {
       setIsRegenerating(false)
     }
   }, [mutateLineage])
+
+  const handleRetryJob = useCallback(async (jobId: string, jobType: string) => {
+    try {
+      const res = await fetch(`/api/projects/${id}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId, jobType }),
+      })
+      if (!res.ok) throw new Error("Failed to retry job")
+      await mutate()
+      toast.success(`Retrying ${jobType}...`)
+    } catch {
+      toast.error("Failed to retry job")
+    }
+  }, [id, mutate])
+
+  const handleDeleteProject = useCallback(async () => {
+    const res = await fetch(`/api/projects/${id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmName: data?.project?.name }),
+    })
+    if (!res.ok) {
+      const error = await res.json()
+      throw new Error(error.error || "Failed to delete project")
+    }
+    toast.success("Project deleted successfully")
+    router.push("/dashboard")
+  }, [id, data?.project?.name, router])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleUsageClick = useCallback((usage: any) => {
@@ -223,6 +255,19 @@ export default function ProjectDetailPage() {
               Generate AI Descriptions
             </Button>
           )}
+          <DeleteProjectDialog
+            projectName={project.name}
+            onDelete={handleDeleteProject}
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
+            </Button>
+          </DeleteProjectDialog>
         </div>
       </div>
 
@@ -252,12 +297,25 @@ export default function ProjectDetailPage() {
 
       {/* Processing Jobs */}
       {jobs.length > 0 && project.status !== "completed" && (
-        <JobsStatus jobs={jobs} />
+        <JobsStatus jobs={jobs} onRetry={handleRetryJob} />
       )}
 
       {/* Upload or Main Content */}
-      {project.status === "pending" ? (
-        <FileUpload projectId={id} onUploadComplete={handleUploadComplete} />
+      {project.status === "pending" || project.status === "failed" ? (
+        <div className="space-y-4">
+          {project.status === "failed" && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertCircle className="h-4 w-4" />
+                <span className="text-sm font-medium">Project processing failed</span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Please try uploading your source code again or contact support if the issue persists.
+              </p>
+            </div>
+          )}
+          <FileUpload projectId={id} onUploadComplete={handleUploadComplete} />
+        </div>
       ) : (
         <Tabs defaultValue="lineage" className="w-full">
           <div className="flex items-center justify-between">
@@ -324,13 +382,23 @@ export default function ProjectDetailPage() {
           <Separator className="my-4" />
 
           <TabsContent value="lineage" className="mt-0">
-            <div ref={flowContainerRef} className="rounded-lg border bg-card overflow-hidden" style={{ height: "calc(100vh - 380px)", minHeight: "600px" }}>
-              <Suspense fallback={<LineageFlowSkeleton />}>
-                <LineageFlow
-                  usages={usages}
-                  onUsageClick={handleUsageClick}
-                />
-              </Suspense>
+            <div ref={flowContainerRef} className="rounded-lg border bg-card overflow-hidden relative" style={{ height: "calc(100vh - 380px)", minHeight: "600px" }}>
+              {isLineageLoading ? (
+                <LineageFlowSkeleton />
+              ) : (
+                <Suspense fallback={<LineageFlowSkeleton />}>
+                  <LineageFlow
+                    usages={usages}
+                    onUsageClick={handleUsageClick}
+                  />
+                </Suspense>
+              )}
+              {isLineageValidating && !isLineageLoading && (
+                <div className="absolute top-3 right-3 flex items-center gap-2 bg-background/90 backdrop-blur-sm rounded-md px-3 py-1.5 border shadow-sm z-50">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  <span className="text-xs text-muted-foreground">Refreshing...</span>
+                </div>
+              )}
             </div>
           </TabsContent>
 

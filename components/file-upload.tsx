@@ -2,22 +2,81 @@
 
 import React from "react"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { Upload, FileArchive, Check, AlertCircle } from "lucide-react"
+import { Upload, FileArchive, Check, AlertCircle, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
 
 interface FileUploadProps {
   projectId: string
   onUploadComplete: () => void
+  maxRetries?: number
 }
 
-export function FileUpload({ projectId, onUploadComplete }: FileUploadProps) {
+// Exponential backoff delay
+function getRetryDelay(attempt: number): number {
+  return Math.min(1000 * Math.pow(2, attempt), 10000) // Max 10 seconds
+}
+
+export function FileUpload({ projectId, onUploadComplete, maxRetries = 3 }: FileUploadProps) {
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [status, setStatus] = useState<"idle" | "uploading" | "processing" | "done" | "error">("idle")
   const [fileName, setFileName] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [retryCount, setRetryCount] = useState(0)
+  const lastFileRef = useRef<File | null>(null)
+
+  const uploadWithRetry = useCallback(
+    async (file: File, attempt: number = 0): Promise<boolean> => {
+      try {
+        const formData = new FormData()
+        formData.append("file", file)
+
+        setProgress(40 + attempt * 10)
+        setStatus("processing")
+
+        const res = await fetch(`/api/projects/${projectId}/upload`, {
+          method: "POST",
+          body: formData,
+        })
+
+        if (!res.ok) {
+          const data = await res.json()
+          throw new Error(data.error || "Upload failed")
+        }
+
+        const data = await res.json()
+        setProgress(100)
+        setStatus("done")
+        setRetryCount(0)
+        toast.success(`Processed ${data.filesProcessed} files`)
+        onUploadComplete()
+        return true
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : "Upload failed"
+        
+        // Check if we should retry
+        if (attempt < maxRetries) {
+          const delay = getRetryDelay(attempt)
+          setRetryCount(attempt + 1)
+          toast.warning(`Upload failed, retrying in ${delay / 1000}s... (${attempt + 1}/${maxRetries})`)
+          
+          await new Promise((resolve) => setTimeout(resolve, delay))
+          return uploadWithRetry(file, attempt + 1)
+        }
+        
+        // Max retries exceeded
+        setStatus("error")
+        setErrorMessage(errorMsg)
+        setRetryCount(0)
+        toast.error(`Upload failed after ${maxRetries} attempts: ${errorMsg}`)
+        return false
+      }
+    },
+    [projectId, onUploadComplete, maxRetries]
+  )
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -28,42 +87,26 @@ export function FileUpload({ projectId, onUploadComplete }: FileUploadProps) {
 
       setUploading(true)
       setFileName(file.name)
+      setErrorMessage(null)
       setStatus("uploading")
       setProgress(20)
+      lastFileRef.current = file
 
-      try {
-        const formData = new FormData()
-        formData.append("file", file)
-
-        setProgress(40)
-        setStatus("processing")
-
-        const res = await fetch(`/api/projects/${projectId}/upload`, {
-          method: "POST",
-          body: formData,
-        })
-
-        setProgress(80)
-
-        if (!res.ok) {
-          const data = await res.json()
-          throw new Error(data.error || "Upload failed")
-        }
-
-        const data = await res.json()
-        setProgress(100)
-        setStatus("done")
-        toast.success(`Processed ${data.filesProcessed} files`)
-        onUploadComplete()
-      } catch (error) {
-        setStatus("error")
-        toast.error(error instanceof Error ? error.message : "Upload failed")
-      } finally {
-        setUploading(false)
-      }
+      await uploadWithRetry(file, 0)
+      setUploading(false)
     },
-    [projectId, onUploadComplete]
+    [uploadWithRetry]
   )
+
+  const handleRetry = useCallback(() => {
+    if (lastFileRef.current) {
+      handleUpload(lastFileRef.current)
+    } else {
+      setStatus("idle")
+      setProgress(0)
+      setErrorMessage(null)
+    }
+  }, [handleUpload])
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
@@ -138,10 +181,17 @@ export function FileUpload({ projectId, onUploadComplete }: FileUploadProps) {
             <p className="mt-1 text-xs text-muted-foreground">
               {status === "uploading"
                 ? "Sending file to server"
-                : "Scanning files and tracing column lineage"}
+                : retryCount > 0
+                  ? `Retry attempt ${retryCount}/${maxRetries}...`
+                  : "Scanning files and tracing column lineage"}
             </p>
           </div>
           <Progress value={progress} className="h-1.5 w-64" />
+          {retryCount > 0 && (
+            <p className="text-xs text-amber-600">
+              Retrying upload...
+            </p>
+          )}
         </div>
       )}
 
@@ -161,17 +211,37 @@ export function FileUpload({ projectId, onUploadComplete }: FileUploadProps) {
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/15">
             <AlertCircle className="h-5 w-5 text-destructive" />
           </div>
-          <p className="text-sm font-medium text-foreground">Upload failed</p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setStatus("idle")
-              setProgress(0)
-            }}
-          >
-            Try again
-          </Button>
+          <div className="text-center">
+            <p className="text-sm font-medium text-foreground">Upload failed</p>
+            {errorMessage && (
+              <p className="mt-1 text-xs text-destructive max-w-xs">
+                {errorMessage}
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRetry}
+              className="gap-1.5"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Retry Upload
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setStatus("idle")
+                setProgress(0)
+                setErrorMessage(null)
+                lastFileRef.current = null
+              }}
+            >
+              Choose Different File
+            </Button>
+          </div>
         </div>
       )}
     </div>

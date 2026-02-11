@@ -66,7 +66,7 @@ export async function GET(
 }
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -76,11 +76,63 @@ export async function DELETE(
     }
 
     const { id } = await params
+    const body = await req.json().catch(() => ({}))
+    const { confirmName } = body
+
     const sql = getDb()
 
+    // Get project to verify ownership and name
+    const projects = await sql`
+      SELECT id, name FROM projects WHERE id = ${id} AND user_id = ${user.id}
+    `
+
+    if (projects.length === 0) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 })
+    }
+
+    const project = projects[0]
+
+    // Verify confirmation name matches
+    if (!confirmName || confirmName !== project.name) {
+      return NextResponse.json(
+        { error: "Confirmation name does not match project name" },
+        { status: 400 }
+      )
+    }
+
+    // Delete all related data in order (respecting foreign key constraints)
+    // 1. Column usages
+    await sql`
+      DELETE FROM column_usages 
+      WHERE column_id IN (
+        SELECT dc.id FROM db_columns dc 
+        JOIN db_schemas ds ON ds.id = dc.schema_id 
+        WHERE ds.project_id = ${id}
+      )
+    `
+
+    // 2. DB columns
+    await sql`
+      DELETE FROM db_columns 
+      WHERE schema_id IN (SELECT id FROM db_schemas WHERE project_id = ${id})
+    `
+
+    // 3. DB schemas
+    await sql`DELETE FROM db_schemas WHERE project_id = ${id}`
+
+    // 4. Source files
+    await sql`DELETE FROM source_files WHERE project_id = ${id}`
+
+    // 5. Processing jobs
+    await sql`DELETE FROM processing_jobs WHERE project_id = ${id}`
+
+    // 6. Finally, delete the project
     await sql`DELETE FROM projects WHERE id = ${id} AND user_id = ${user.id}`
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ 
+      success: true, 
+      message: `Project "${project.name}" and all related data deleted successfully` 
+    })
   } catch (error) {
     console.error("Error deleting project:", error)
     return NextResponse.json(

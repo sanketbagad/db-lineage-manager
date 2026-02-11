@@ -1,15 +1,58 @@
 import { Skeleton } from "@/components/ui/skeleton"
+import { Loader2, Database, FileCode, ArrowRight } from "lucide-react"
 
 export function LineageFlowSkeleton() {
   return (
-    <div className="w-full h-[750px] rounded-xl border-2 border-border/50 bg-card/80 flex items-center justify-center">
-      <div className="flex flex-col items-center gap-4">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-6 w-64" />
-        <div className="mt-8 flex gap-4">
-          <Skeleton className="h-64 w-48" />
-          <Skeleton className="h-64 w-48" />
-          <Skeleton className="h-64 w-48" />
+    <div className="w-full h-full min-h-[600px] rounded-xl border bg-card flex flex-col">
+      {/* Toolbar skeleton */}
+      <div className="flex items-center gap-3 p-3 border-b bg-muted/30">
+        <Skeleton className="h-8 w-64" />
+        <div className="h-5 w-px bg-border" />
+        <Skeleton className="h-7 w-24" />
+        <Skeleton className="h-7 w-24" />
+        <Skeleton className="h-7 w-24" />
+        <div className="ml-auto flex gap-2">
+          <Skeleton className="h-8 w-20" />
+          <Skeleton className="h-8 w-20" />
+        </div>
+      </div>
+      
+      {/* Loading content */}
+      <div className="flex-1 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="flex items-center gap-4 text-muted-foreground">
+            <div className="p-3 rounded-lg bg-muted/20">
+              <Database className="h-6 w-6" />
+            </div>
+            <ArrowRight className="h-5 w-5 animate-pulse" />
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <ArrowRight className="h-5 w-5 animate-pulse" />
+            <div className="p-3 rounded-lg bg-muted/20">
+              <FileCode className="h-6 w-6" />
+            </div>
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-medium">Loading Lineage Data</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Fetching column usage information...
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function LineageLoadingOverlay() {
+  return (
+    <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 rounded-xl">
+      <div className="flex flex-col items-center gap-3 p-6 rounded-lg bg-card border shadow-lg">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="text-center">
+          <p className="text-sm font-medium">Generating Lineage</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            This may take a moment...
+          </p>
         </div>
       </div>
     </div>
