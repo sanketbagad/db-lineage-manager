@@ -1,0 +1,14 @@
+{
+  "name": "sql-server-connect",
+  "version": "1.0.0",
+  "description": "SQL Server connection test",
+  "type": "module",
+  "scripts": {
+    "test": "node test-connection.js",
+    "tables": "node list-tables.js",
+    "schema": "node export-schema.js"
+  },
+  "dependencies": {
+    "mssql": "^10.0.2"
+  }
+}
